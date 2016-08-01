@@ -42,14 +42,14 @@ do
   echo "Docker Daemon '${ENGINE}' Configuration:"
   ENGINE_BRIDGE="br_${ENGINE}"
   ENGINE_SUBNET="${SUBNET}.${COUNT}.0/${MASK}"
-  ENGINE_LABEL="docker-${ENGINE}-daemon"
+  ENGINE_LABEL="engine_type=${ENGINE}-daemon"
 
 
   brctl addbr ${ENGINE_BRIDGE}
   ip addr add ${ENGINE_SUBNET} dev ${ENGINE_BRIDGE}
   ip link set dev ${ENGINE_BRIDGE} up
 
-  if ! iptables -t nat -C POSTROUTING -j MASQUERADE -s ${ENGINE_SUBNET} -d 0.0.0.0/0
+  if ! iptables -t nat -C POSTROUTING -j MASQUERADE -s ${ENGINE_SUBNET} -d 0.0.0.0/0 2>/dev/null
   then
     echo "Adding POSTROUTING NAT Iptables Rules"
     iptables -t nat -A POSTROUTING -j MASQUERADE -s ${ENGINE_SUBNET} -d 0.0.0.0/0
