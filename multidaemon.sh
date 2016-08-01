@@ -60,6 +60,10 @@ do
   ENGINE_ROOTDIR=${DOCKER_ROOTDIR}-${ENGINE}
   mkdir -p ${ENGINE_ROOTDIR}
 
+  #Docker Daemon Execution State Files Dir
+  ENGINE_EXECDIR=${DOCKER_RUNDIR}-${ENGINE}
+  mkdir -p ${ENGINE_EXECDIR}
+
   #Docker Daemon Configuration Dir
   ENGINE_CONFIGDIR=${DOCKER_CONFIGDIR}-${ENGINE}
   mkdir -p ${ENGINE_CONFIGDIR}
@@ -72,12 +76,13 @@ do
   mkdir -p ${ENGINE_LOGDIR}
 
   nohup docker daemon -D \
-    -g ${ENGINE_ROOTDIR}/g \
-    --exec-root=${ENGINE_ROOTDIR}/e \
+    -g ${ENGINE_ROOTDIR} \
+    --exec-root=${ENGINE_EXECDIR} \
     -b ${ENGINE_BRIDGE} \
     --dns=${DOCKER_DNS} \
     --iptables=false \
     ${ENGINE_CONFIG} \
+    --label=${ENGINE_LABEL} \
     -H unix://${DOCKER_RUNDIR}/docker-${ENGINE}.sock \
     -p ${DOCKER_RUNDIR}/docker-${ENGINE}.pid > ${ENGINE_LOGDIR}/docker.log 2>&1 </dev/null &
 
