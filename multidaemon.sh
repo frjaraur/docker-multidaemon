@@ -1,5 +1,13 @@
-#!/bin/bash
+#!/bin/bash -x
 
+MGMTIP=$1
+
+SERVICEIP=$2
+
+SWARMROLE=$3
+
+#SHARED Between Nodes..
+TMPSHARED="/tmp_deploying_stage"
 #Docker Multi Daemon
 
 # DEFAULTS
@@ -17,20 +25,39 @@ MASK="24"
 DOCKER_DNS="8.8.8.8"
 
 # ENGINE NAMES
-ENGINE_NAMES[0]="infra"
+ENGINE_NAMES[0]="mgmt"
 ENGINE_NAMES[1]="service"
 
+# Not Cool :\
+ENGINE_IPS[0]=$MGMTIP
+ENGINE_IPS[1]=$SERVICEIP
 
 ErrorMessage(){
-
   echo "$(date +%Y/%m/%d-%H:%M:%S) ERROR: $*"
   exit 1
 }
+
+InfoMessage(){
+  echo "$(date +%Y/%m/%d-%H:%M:%S) INFO: $*"
+}
+
+
+if ! dpkg -l docker >/dev/null 2>&1
+then
+  #Install Engine (This way, we can reprovision)
+  InfoMessage "Installing Docker"
+  apt-get install -qq curl \
+  && curl -sSL https://get.docker.com/ | sh \
+  && curl -fsSL https://get.docker.com/gpg | sudo apt-key add - \
+  && usermod -aG docker vagrant \
+  && service docker stop && update-rc.d docker disable
+fi
 
 # Check for bridge-utils
 # Ubuntu/debian
 if ! dpkg -l bridge-utils >/dev/null 2>&1
 then
+  InfoMessage "Installing Bridge-Utils"
   apt-get install -qq bridge-utils >/dev/null 2>&1
   [ $? -ne 0 ] && ErrorMessage "Can not install 'bridge-utils', exiting..."
 fi
@@ -75,7 +102,8 @@ do
   ENGINE_LOGDIR=${DOCKER_LOGDIR}-${ENGINE}
   mkdir -p ${ENGINE_LOGDIR}
 
-  nohup docker daemon -D \
+  [ ! -f ${DOCKER_RUNDIR}/docker-${ENGINE}.sock ] \
+  && nohup docker daemon -D \
     -g ${ENGINE_ROOTDIR} \
     --exec-root=${ENGINE_EXECDIR} \
     -b ${ENGINE_BRIDGE} \
@@ -83,8 +111,34 @@ do
     --iptables=false \
     ${ENGINE_CONFIG} \
     --label=${ENGINE_LABEL} \
-    -H unix://${DOCKER_RUNDIR}/docker-${ENGINE}.sock \
+    -H unix://${DOCKER_RUNDIR}/docker-${ENGINE}.sock -H tcp://${ENGINE_IPS[$COUNT]}:2375 \
     -p ${DOCKER_RUNDIR}/docker-${ENGINE}.pid > ${ENGINE_LOGDIR}/docker.log 2>&1 </dev/null &
+
+
+    sleep 10 # Wait 10 seconds for daemons...
+    #SWARM
+    InfoMessage "SWARM MODE ROLE [${SWARMROLE}]"
+    case ${SWARMROLE} in
+      manager)
+        [ ! -f ${TMPSHARED}/${ENGINE}.manager.token ] && InfoMessage "Initiating Swarm Cluster [${ENGINE}]" \
+        && docker -H ${ENGINE_IPS[$COUNT]}:2375 swarm init --advertise-addr ${ENGINE_IPS[$COUNT]}:2375 --listen-addr ${ENGINE_IPS[$COUNT]}:3375 \
+        && docker -H ${ENGINE_IPS[$COUNT]}:2375 swarm join-token manager -q > ${TMPSHARED}/${ENGINE}.manager.token \
+        && docker -H ${ENGINE_IPS[$COUNT]}:2375 swarm join-token worker -q > ${TMPSHARED}/${ENGINE}.worker.token \
+        && continue
+
+        [ -f ${TMPSHARED}/${ENGINE}.manager.token ] && InfoMessage "Joining Swarm Cluster [${ENGINE}]" \
+        && docker swarm join  --advertise-addr ${ENGINE_IPS[$COUNT]}:2375 --listen-addr ${ENGINE_IPS[$COUNT]}:3375 \
+        --token $(cat ${TMPSHARED}/${ENGINE}.manager.token)
+      ;;
+
+      worker)
+        docker swarm join  --advertise-addr ${ENGINE_IPS[$COUNT]}:2375 --listen-addr ${ENGINE_IPS[$COUNT]}:3375 \
+        --token $(cat ${TMPSHARED}/${ENGINE}.worker.token)
+
+      ;;
+
+    esac
+
 
     COUNT=$(($COUNT+1))
 done
